@@ -52,6 +52,10 @@ class RADTBenchmark:
             run = mlflow.active_run()
         self.run_id = run.info.run_id
 
+        # Initialize max_epoch and max_time
+        self.max_epoch = int(os.getenv("RADT_MAX_EPOCH"))
+        self.max_time = time() + int(os.getenv("RADT_MAX_TIME"))
+
         # Capture (package) versions for pip, conda, smi
         try:
             self.log_text("".join(execute_command("pip freeze")), "pip.txt")
@@ -67,6 +71,8 @@ class RADTBenchmark:
             self.log_text("".join(execute_command("nvidia-smi")), "smi.txt")
         except FileNotFoundError as e:
             pass
+        
+        self.carbon_tracker = None
 
     def __dir__(self):
         return dir(super()) + dir(mlflow)
@@ -112,6 +118,11 @@ class RADTBenchmark:
         for thread in self.threads:
             thread.start()
 
+        from carbontracker.tracker import CarbonTracker
+        self.carbon_tracker = CarbonTracker(epochs=self.max_epoch)
+        print(f"Initializing CarbonTracker with epochs: {self.max_epoch}")
+        self.carbon_tracker.epoch_start()
+
         return self
 
     def __exit__(self, type, value, traceback):
@@ -120,6 +131,10 @@ class RADTBenchmark:
             return
         for thread in self.threads:
             thread.terminate()
+        
+        if self.carbon_tracker is not None:
+            self.carbon_tracker.epoch_end()
+            self.carbon_tracker.stop()
         mlflow.end_run()
 
     def log_metric(self, name, value, epoch=0):
@@ -137,6 +152,10 @@ class RADTBenchmark:
         if "RADT_MAX_EPOCH" not in os.environ:
             return
         mlflow.log_metric(name, value, epoch)
+
+        if self.carbon_tracker is not None:
+                self.carbon_tracker.epoch_step(epoch)
+
         if epoch >= self.max_epoch or time() > self.max_time:
             print("Maximum epoch reached")
             sys.exit()
@@ -152,6 +171,10 @@ class RADTBenchmark:
         if "RADT_MAX_EPOCH" not in os.environ:
             return
         mlflow.log_metrics(metrics, epoch)
+
+        if self.carbon_tracker is not None:
+                self.carbon_tracker.epoch_step(epoch)
+
         if epoch >= self.max_epoch or time() > self.max_time:
             print("Maximum epoch reached")
             sys.exit()
