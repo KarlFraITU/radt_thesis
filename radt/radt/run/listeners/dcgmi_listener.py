@@ -37,13 +37,50 @@ class DCGMIThread(Process):
 
         # Hierarchy of metrics to monitor. Fall back in ascending order if certain metrics are not available for collection.
         self.dcgm_fields = [
-            [155,156,200,201,203,204,1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011,1012], # A100, H100
-            [155,156,200,201,203,204,1001,1002,1003,1004,1005,1007,1008,1009,1010,1011,1012], # A10
-            [155,156,200,201,203,204], # Rest
+            [
+                155,
+                156,
+                200,
+                201,
+                203,
+                204,
+                1001,
+                1002,
+                1003,
+                1004,
+                1005,
+                1006,
+                1007,
+                1008,
+                1009,
+                1010,
+                1011,
+                1012,
+            ],  # A100, H100
+            [
+                155,
+                156,
+                200,
+                201,
+                203,
+                204,
+                1001,
+                1002,
+                1003,
+                1004,
+                1005,
+                1007,
+                1008,
+                1009,
+                1010,
+                1011,
+                1012,
+            ],  # A10
+            [155, 156, 200, 201, 203, 204],  # Rest
         ]
 
     def _start_dcgm(self, idx):
-        fields = ",".join(map(str,self.dcgm_fields[idx]))
+        fields = ",".join(map(str, self.dcgm_fields[idx]))
         self.dcgm = subprocess.Popen(
             f"dcgmi dmon -e {fields} -g {DCGMI_GROUP_ID}".split(),
             stdout=subprocess.PIPE,
@@ -51,6 +88,8 @@ class DCGMIThread(Process):
         )
 
     def run(self):
+        mlflow.start_run(run_id=self.run_id).__enter__()  # attach to run
+
         for idx, _ in enumerate(self.dcgm_fields):
             self._start_dcgm(idx)
 

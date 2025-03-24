@@ -10,6 +10,7 @@ class TOPThread(Process):
         run_id,
         process_names=[
             "python",
+            "pt_data_worker",
         ],
         experiment_id=88,
     ):
@@ -20,6 +21,8 @@ class TOPThread(Process):
         self.process_names = process_names
 
     def run(self):
+        mlflow.start_run(run_id=self.run_id).__enter__()  # attach to run
+
         self.top = subprocess.Popen(
             "top -i -b -n 999999999 -d 1".split(),
             stdout=subprocess.PIPE,
@@ -47,9 +50,11 @@ class TOPThread(Process):
                 pass
             else:
                 word_vector = line.strip().split()
-                if (line.startswith("KiB") or line.startswith("MiB")) and len(
-                    word_vector
-                ) != 0:
+                if (
+                    line.startswith("KiB")
+                    or line.startswith("MiB")
+                    or line.startswith("GiB")
+                ) and len(word_vector) != 0:
                     if word_vector[1] == "Mem":
                         Flag = not (Flag)
 
@@ -68,7 +73,7 @@ class TOPThread(Process):
                         m["TOP - Swap Memory GB"] = float(word_vector[6]) / 1000
 
                 elif len(word_vector) != 0:
-                    if word_vector[11] in self.process_names:
+                    if word_vector[11].strip() in self.process_names:
                         if Flag != pervFlag:
                             CPU_util += float(word_vector[8])
                             Mem_util += float(word_vector[9])

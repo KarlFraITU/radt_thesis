@@ -5,6 +5,7 @@ import time
 
 from multiprocessing import Process
 
+
 # This listener writes *a lot* of metrics and may affect performance!
 class PSThread(Process):
     def __init__(self, run_id, experiment_id=88):
@@ -14,6 +15,8 @@ class PSThread(Process):
         self.parent_pid = os.getpid()
 
     def run(self):
+        mlflow.start_run(run_id=self.run_id).__enter__()  # attach to run
+
         while True:
             output = (
                 subprocess.run(
