@@ -1,0 +1,10 @@
+Log file: ./carbon_logs/16177.459007_2025-03-25T211548Z_carbontracker_output.log
+Duration: 0.0 seconds
+Energy used: 0.0 kWh
+CO2 emissions: 0.0 g
+Equivalent to 0.0 km travelled by car
+
+--- AGGREGATED TOTALS ---
+Total energy: 0.0 kWh
+Total CO2: 0.0 g (0.0 kg)
+Equivalent to 0.0 km travelled by car

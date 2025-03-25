@@ -12,6 +12,7 @@ from .listeners import (
     top_listener,
     iostat_listener,
     free_listener,
+    carbontracker_listener, 
 )
 
 
@@ -79,6 +80,7 @@ class RADTBenchmark:
         except FileNotFoundError as e:
             pass
         
+        # Initialize carbon tracker reference but don't start it yet
         self.carbon_tracker = None
 
     def __dir__(self):
@@ -124,14 +126,16 @@ class RADTBenchmark:
         if os.getenv("RADT_LISTENER_FREE") == "True":
             os.environ["RADT_LISTENER_FREE"] = "False"
             self.threads.append(free_listener.FreeThread(self.run_id))
+        
+        # Add the carbon tracker listener
+        if os.getenv("RADT_LISTENER_CARBONTRACKER") == "True":
+            os.environ["RADT_LISTENER_CARBONTRACKER"] = "False"
+            carbon_thread = carbontracker_listener.CarbonTrackerThread(self.run_id)
+            self.threads.append(carbon_thread)
+            self.carbon_tracker = carbon_thread  # Store reference for epoch handling
 
         for thread in self.threads:
             thread.start()
-
-        from carbontracker.tracker import CarbonTracker
-        self.carbon_tracker = CarbonTracker(epochs=self.max_epoch)
-        print(f"Initializing CarbonTracker with epochs: {self.max_epoch}")
-        self.carbon_tracker.epoch_start()
 
         return self
 
@@ -139,12 +143,19 @@ class RADTBenchmark:
         # Terminate listeners and run
         if "RADT_MAX_EPOCH" not in os.environ:
             return
+            
+        # Print the carbon tracker summary if available
+        if self.carbon_tracker:
+            try:
+                print("\n===== Carbon Emissions Summary =====")
+                self.carbon_tracker.print_aggregate()
+                print("===================================\n")
+            except Exception as e:
+                print(f"Error printing carbon summary: {e}")
+            
         for thread in self.threads:
             thread.terminate()
-        
-        if self.carbon_tracker is not None:
-            self.carbon_tracker.epoch_end()
-            self.carbon_tracker.stop()
+            
         mlflow.end_run()
 
     def log_metric(self, name, value, epoch=0):
@@ -161,11 +172,13 @@ class RADTBenchmark:
         """
         if "RADT_MAX_EPOCH" not in os.environ:
             return
+            
+        # Update carbon tracker epoch if present
+        if self.carbon_tracker and epoch > self.carbon_tracker.current_epoch:
+            self.carbon_tracker.epoch_end()
+            
         mlflow.log_metric(name, value, epoch)
-
-        if self.carbon_tracker is not None:
-                self.carbon_tracker.epoch_step(epoch)
-
+        
         if epoch >= self.max_epoch or time() > self.max_time:
             print("Maximum epoch reached")
             sys.exit()
@@ -180,11 +193,32 @@ class RADTBenchmark:
         """
         if "RADT_MAX_EPOCH" not in os.environ:
             return
+            
+        # Update carbon tracker epoch if present
+        if self.carbon_tracker and epoch > self.carbon_tracker.current_epoch:
+            self.carbon_tracker.epoch_end()
+            
         mlflow.log_metrics(metrics, epoch)
-
-        if self.carbon_tracker is not None:
-                self.carbon_tracker.epoch_step(epoch)
 
         if epoch >= self.max_epoch or time() > self.max_time:
             print("Maximum epoch reached")
             sys.exit()
+            
+    def log_text(self, text, artifact_file):
+        """Log text as an artifact file."""
+        if "RADT_MAX_EPOCH" not in os.environ:
+            return
+        with open(artifact_file, "w") as f:
+            f.write(text)
+        mlflow.log_artifact(artifact_file)
+        os.remove(artifact_file)
+        
+    def get_carbon_summary(self):
+        """Get a summary of carbon emissions from the tracker.
+        
+        Returns:
+            dict: Summary of carbon tracking results or None if not available
+        """
+        if self.carbon_tracker:
+            return self.carbon_tracker.get_summary()
+        return None
