@@ -1,142 +1,112 @@
 import os
-import threading
-import time
+import re
+import glob
 import mlflow
+import threading
+from time import sleep, time 
 from carbontracker.tracker import CarbonTracker
 
-class CarbonTrackerThread(threading.Thread):
-    """Thread for tracking carbon emissions using carbontracker."""
+class CarbonTrackerListener(threading.Thread):
     
-    def __init__(self, run_id, interval=60):
-        """Initialize the CarbonTracker thread.
-        
-        Args:
-            run_id (str): MLflow run ID (stored but not used for logging)
-            interval (int): Interval in seconds between tracking measurements
-        """
-        threading.Thread.__init__(self)
+    def __init__(self, run_id, experiment_id=88, carbon_log_dir='./carbon_logs', epoch_duration_threshold=2):
+        super().__init__(daemon=True)
         self.run_id = run_id
-        self.interval = interval
-        self.terminated = False
-        
-        # Get max epochs from environment or default to 5
-        self.max_epochs = int(os.getenv("RADT_MAX_EPOCH", 5))
-        
-        # Set up log directory
-        self.log_dir = os.getenv("RADT_CARBON_LOG_DIR", "./carbon_logs")
-        os.makedirs(self.log_dir, exist_ok=True)
-        
-        # Initialize the tracker with file logging enabled
-        self.tracker = CarbonTracker(
-            epochs=self.max_epochs,
-            log_dir=self.log_dir,
-            update_interval=self.interval,
-            verbose=1          # Show more detailed output
-        )
-        
-        # Current epoch tracking
+        self.carbon_log_dir = carbon_log_dir
+        self.epoch_duration_threshold = epoch_duration_threshold
+        self.max_epochs = int(os.getenv("RADT_MAX_EPOCH"))
+
+        # Internal state tracking
         self.current_epoch = 0
-        
-        # For tracking whether we're in an epoch
-        self.in_epoch = False
-        
-        # Store log file paths
-        self.standard_log = None
-        self.output_log = None
-        
-    def run(self):
-        """Run the thread."""
+        self.last_epoch_time = time()
+        self._stop_event = threading.Event()
+        self.latest_log_file = None  # Store the latest log file path
+
+        # Initialize the CarbonTracker instance
+        self.carbon_tracker = CarbonTracker(epochs=int(os.getenv("RADT_MAX_EPOCH")), log_dir=carbon_log_dir)
+
+    def parse_and_log_metrics(self, epoch):
+        log_files = glob.glob(os.path.join(self.carbon_log_dir, '*.log'))
+        if not log_files:
+            print("No CarbonTracker log files found yet.")
+            return
+
+        # Use the most recently created log file
+        self.latest_log_file = max(log_files, key=os.path.getctime)
+
         try:
-            # Start the global tracker
-            self.tracker.init()
+            with open(self.latest_log_file, 'r') as f:
+                log_content = f.read()  # Read entire file content
+
+            # Find all GPU power usage entries
+            power_matches = re.findall(r'Epoch\s*(\d+):.*?Average power usage \(W\) for gpu:\s*(\d+\.?\d*)', log_content, re.DOTALL | re.IGNORECASE)
             
-            # Start the first epoch
-            self.epoch_start()
+            # Find carbon intensity value
+            carbon_intensity_match = re.search(r'Average carbon intensity during training was (\d+\.?\d*) gCO2/kWh', log_content, re.IGNORECASE)
             
-            while not self.terminated:
-                # Just sleep for the interval - logging is handled by carbontracker
-                time.sleep(self.interval)
-        except Exception as e:
-            print(f"Error in CarbonTracker thread: {e}")
-        finally:
-            # Clean up
-            if self.tracker:
-                self.tracker.stop()
+            # Prepare metrics dictionary
+            metrics = {}
+
+            # Log GPU power for the current epoch
+            for matched_epoch, gpu_power in power_matches:
+                matched_epoch = int(matched_epoch)
                 
-                # After stopping, log the results summary to MLflow as an artifact
-                try:
-                    # Find the log files that were created
-                    from carbontracker import parser
-                    logs = parser.parse_all_logs(log_dir=self.log_dir)
-                    
-                    if logs:
-                        # Create a summary file with the results
-                        summary_path = os.path.join(self.log_dir, f"carbon_summary_{self.run_id}.txt")
-                        with open(summary_path, "w") as f:
-                            for log in logs:
-                                f.write(f"Log file: {log['output_filename']}\n")
-                                f.write(f"Duration: {log['actual']['duration (s)']} seconds\n")
-                                f.write(f"Energy used: {log['actual']['energy (kWh)']} kWh\n")
-                                f.write(f"CO2 emissions: {log['actual']['co2eq (g)']} g\n")
-                                f.write(f"Equivalent to {log['actual']['equivalents']['km travelled by car']} km travelled by car\n")
-                                f.write("\n")
-                            
-                            # Add the aggregated totals
-                            f.write("--- AGGREGATED TOTALS ---\n")
-                            total_energy = sum(log['actual']['energy (kWh)'] for log in logs)
-                            total_co2 = sum(log['actual']['co2eq (g)'] for log in logs)
-                            total_km = sum(log['actual']['equivalents']['km travelled by car'] for log in logs)
-                            
-                            f.write(f"Total energy: {total_energy} kWh\n")
-                            f.write(f"Total CO2: {total_co2} g ({total_co2/1000} kg)\n")
-                            f.write(f"Equivalent to {total_km} km travelled by car\n")
-                        
-                        # Log the summary file to MLflow
-                        mlflow.log_artifact(summary_path)
-                except Exception as e:
-                    print(f"Error creating carbon summary: {e}")
-    
-    def epoch_start(self):
-        """Mark the start of an epoch."""
-        if not self.in_epoch:
-            self.in_epoch = True
-            self.tracker.epoch_start()
-    
-    def epoch_end(self):
-        """Mark the end of an epoch."""
-        if self.in_epoch:
-            self.tracker.epoch_end()
-            self.in_epoch = False
-            self.current_epoch += 1
+                # Only log the metric for the current processing epoch
+                if matched_epoch == epoch:
+                    metrics['Carbontracker - GPU Power W'] = float(gpu_power)
+
+            # Log overall carbon intensity if found
+            if carbon_intensity_match:
+                carbon_intensity = float(carbon_intensity_match.group(1))
+                metrics['Carbontracker - Carbon Intensity gCO2/kWh'] = carbon_intensity
+
+            # Log metrics for the current processing epoch
+            if metrics:
+                mlflow.log_metrics(metrics, step=epoch)
+                
+        except Exception as e:
+            print(f"Error parsing or logging metrics from file {self.latest_log_file}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def run(self):
+        mlflow.start_run(run_id=self.run_id).__enter__()  # Attach to run
+        self.carbon_tracker.epoch_start()  # Start CarbonTracker monitoring
+
+        try:
+            while not self._stop_event.is_set() and self.current_epoch < self.max_epochs:
+                time_now = time()
+                time_since_last_epoch = time_now - self.last_epoch_time
+
+                # Check if enough time has passed for a new epoch
+                if time_since_last_epoch >= self.epoch_duration_threshold:
+                    self.current_epoch += 1
+                    self.last_epoch_time = time_now
+
+                    # End the previous epoch, start the next one, and log metrics
+                    try:
+                        self.carbon_tracker.epoch_end()
+                        self.carbon_tracker.epoch_start()
+                        self.parse_and_log_metrics(self.current_epoch)
+                    except Exception as e:
+                        print(f"Error during epoch {self.current_epoch}: {e}")
+
+                # Sleep to prevent tight looping
+                sleep(5)
+
+        except Exception as e:
+            print(f"Error in CarbonTracker listener: {e}")
+        finally:
+            # Ensure CarbonTracker and MLflow are stopped cleanly
+            self.carbon_tracker.epoch_end()
             
-            # Start the next epoch if we haven't reached the maximum
-            if self.current_epoch < self.max_epochs:
-                self.epoch_start()
-    
+            # Log the final complete log file as an artifact
+            if self.latest_log_file and os.path.exists(self.latest_log_file):
+                mlflow.log_artifact(self.latest_log_file, artifact_path='carbon_logs')
+            
+            self.carbon_tracker.stop()
+            mlflow.end_run()
+
     def terminate(self):
-        """Terminate the thread."""
-        self.terminated = True
-        if self.tracker:
-            self.tracker.stop()
-            
-    def get_summary(self):
-        """Get a summary of the carbon tracking results.
-        
-        Returns:
-            dict: Summary of carbon tracking results
-        """
-        try:
-            from carbontracker import parser
-            logs = parser.parse_all_logs(log_dir=self.log_dir)
-            return logs
-        except Exception as e:
-            print(f"Error getting carbon summary: {e}")
-            return None
-            
-    def print_aggregate(self):
-        """Print the aggregate carbon tracking results."""
-        try:
-            from carbontracker import parser
-            parser.print_aggregate(log_dir=self.log_dir)
-        except Exception as e:
-            print(f"Error printing carbon aggregate: {e}")
+        self._stop_event.set()
+        self.carbon_tracker.epoch_end()
+        self.carbon_tracker.stop()

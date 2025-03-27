@@ -1,7 +1,7 @@
 import os
 import sys
 import types
-from time import time
+from time import time, sleep
 from subprocess import PIPE, Popen
 import mlflow
 
@@ -15,10 +15,8 @@ from .listeners import (
     carbontracker_listener, 
 )
 
-
 def dummy(*args, **kwargs):
     return
-
 
 def execute_command(cmd: str):
     """Execute a command
@@ -43,7 +41,6 @@ def execute_command(cmd: str):
             pass
 
     return result
-
 
 class RADTBenchmark:
     def __init__(self):
@@ -82,6 +79,8 @@ class RADTBenchmark:
         
         # Initialize carbon tracker reference but don't start it yet
         self.carbon_tracker = None
+        # Initialize epoch thread reference
+        self.epoch_thread = None
 
     def __dir__(self):
         return dir(super()) + dir(mlflow)
@@ -126,14 +125,10 @@ class RADTBenchmark:
         if os.getenv("RADT_LISTENER_FREE") == "True":
             os.environ["RADT_LISTENER_FREE"] = "False"
             self.threads.append(free_listener.FreeThread(self.run_id))
-        
-        # Add the carbon tracker listener
         if os.getenv("RADT_LISTENER_CARBONTRACKER") == "True":
             os.environ["RADT_LISTENER_CARBONTRACKER"] = "False"
-            carbon_thread = carbontracker_listener.CarbonTrackerThread(self.run_id)
-            self.threads.append(carbon_thread)
-            self.carbon_tracker = carbon_thread  # Store reference for epoch handling
-
+            self.threads.append(carbontracker_listener.CarbonTrackerListener(self.run_id))
+        
         for thread in self.threads:
             thread.start()
 
@@ -143,16 +138,13 @@ class RADTBenchmark:
         # Terminate listeners and run
         if "RADT_MAX_EPOCH" not in os.environ:
             return
-            
-        # Print the carbon tracker summary if available
-        if self.carbon_tracker:
+        
+        if self.carbon_tracker is not None:
             try:
-                print("\n===== Carbon Emissions Summary =====")
-                self.carbon_tracker.print_aggregate()
-                print("===================================\n")
+                self.carbon_tracker.stop()
             except Exception as e:
-                print(f"Error printing carbon summary: {e}")
-            
+                print(f"Error stopping carbon tracker: {e}")
+
         for thread in self.threads:
             thread.terminate()
             
@@ -173,10 +165,6 @@ class RADTBenchmark:
         if "RADT_MAX_EPOCH" not in os.environ:
             return
             
-        # Update carbon tracker epoch if present
-        if self.carbon_tracker and epoch > self.carbon_tracker.current_epoch:
-            self.carbon_tracker.epoch_end()
-            
         mlflow.log_metric(name, value, epoch)
         
         if epoch >= self.max_epoch or time() > self.max_time:
@@ -192,12 +180,9 @@ class RADTBenchmark:
                      Defaults to 0.
         """
         if "RADT_MAX_EPOCH" not in os.environ:
-            return
-            
-        # Update carbon tracker epoch if present
-        if self.carbon_tracker and epoch > self.carbon_tracker.current_epoch:
-            self.carbon_tracker.epoch_end()
-            
+            returncode
+        
+
         mlflow.log_metrics(metrics, epoch)
 
         if epoch >= self.max_epoch or time() > self.max_time:
@@ -219,6 +204,5 @@ class RADTBenchmark:
         Returns:
             dict: Summary of carbon tracking results or None if not available
         """
-        if self.carbon_tracker:
-            return self.carbon_tracker.get_summary()
+
         return None
