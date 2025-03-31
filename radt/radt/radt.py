@@ -83,7 +83,7 @@ def schedule_parse_arguments(args: list):
         "--epoch",
         type=int,
         dest="max_epoch",
-        default=5,
+        default=50,
         help="Maximum number of epochs to train for",
     )
     parser.add_argument(
