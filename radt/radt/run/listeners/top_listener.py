@@ -8,6 +8,7 @@ class TOPThread(Process):
     def __init__(
         self,
         run_id,
+        epoch=0,
         process_names=[
             "python",
             "pt_data_worker",
@@ -17,6 +18,7 @@ class TOPThread(Process):
         super(TOPThread, self).__init__()
         self.run_id = run_id
         self.experiment_id = experiment_id
+        self.epoch = epoch 
 
         self.process_names = process_names
 
@@ -78,7 +80,7 @@ class TOPThread(Process):
                             CPU_util += float(word_vector[8])
                             Mem_util += float(word_vector[9])
             if len(m):
-                mlflow.log_metrics(m)
+                mlflow.log_metrics(m, self.epoch.value)
 
         m = {}
         m["TOP - CPU Utilization"] = CPU_util

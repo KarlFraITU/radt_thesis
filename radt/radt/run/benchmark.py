@@ -4,6 +4,7 @@ import types
 from time import time, sleep
 from subprocess import PIPE, Popen
 import mlflow
+from multiprocessing import Value
 
 from .listeners import (
     dcgmi_listener,
@@ -43,11 +44,25 @@ def execute_command(cmd: str):
     return result
 
 class RADTBenchmark:
+    _instance = None
+    _initialized = False
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(RADTBenchmark, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self):
         """
         Context manager for a run.
         Will track ML operations while active.
         """
+        if self._initialized:
+            return
+        self._initialized = True
+
+        self.epoch = Value('i', 0)  # 'i' indicates an integer type
+
         if "RADT_MAX_EPOCH" not in os.environ:
             return
 
@@ -109,28 +124,31 @@ class RADTBenchmark:
         # Spawn threads for listeners
         if os.getenv("RADT_LISTENER_PS") == "True":
             os.environ["RADT_LISTENER_PS"] = "False"
-            self.threads.append(ps_listener.PSThread(self.run_id))
+            self.threads.append(ps_listener.PSThread(self.run_id, self.epoch))
         if os.getenv("RADT_LISTENER_SMI") == "True":
             os.environ["RADT_LISTENER_SMI"] = "False"
-            self.threads.append(smi_listener.SMIThread(self.run_id))
+            self.threads.append(smi_listener.SMIThread(self.run_id, self.epoch))
         if os.getenv("RADT_LISTENER_DCGMI") == "True":
             os.environ["RADT_LISTENER_DCGMI"] = "False"
-            self.threads.append(dcgmi_listener.DCGMIThread(self.run_id))
+            self.threads.append(dcgmi_listener.DCGMIThread(self.run_id, self.epoch))
         if os.getenv("RADT_LISTENER_TOP") == "True":
             os.environ["RADT_LISTENER_TOP"] = "False"
-            self.threads.append(top_listener.TOPThread(self.run_id))
+            self.threads.append(top_listener.TOPThread(self.run_id, self.epoch))
         if os.getenv("RADT_LISTENER_IOSTAT") == "True":
             os.environ["RADT_LISTENER_IOSTAT"] = "False"
-            self.threads.append(iostat_listener.IOstatThread(self.run_id))
+            self.threads.append(iostat_listener.IOstatThread(self.run_id, self.epoch))
         if os.getenv("RADT_LISTENER_FREE") == "True":
             os.environ["RADT_LISTENER_FREE"] = "False"
-            self.threads.append(free_listener.FreeThread(self.run_id))
+            self.threads.append(free_listener.FreeThread(self.run_id, self.epoch))
         if os.getenv("RADT_LISTENER_CARBONTRACKER") == "True":
             os.environ["RADT_LISTENER_CARBONTRACKER"] = "False"
-            self.threads.append(carbontracker_listener.CarbonTrackerListener(self.run_id))
+            self.threads.append(carbontracker_listener.CarbonTrackerListener(self.run_id, self.epoch))
         
         for thread in self.threads:
             thread.start()
+        
+        print(f"[Constructor] RADTBenchmark instance created: {id(self)} AND THREADS: {self.threads}")
+
 
         return self
 
@@ -164,6 +182,8 @@ class RADTBenchmark:
         """
         if "RADT_MAX_EPOCH" not in os.environ:
             return
+        
+        self.epoch.value = epoch
             
         mlflow.log_metric(name, value, epoch)
         

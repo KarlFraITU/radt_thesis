@@ -6,10 +6,12 @@ from multiprocessing import Process
 
 
 class FreeThread(Process):
-    def __init__(self, run_id, experiment_id=88):
+    def __init__(self, run_id,epoch=0, experiment_id=88):
         super(FreeThread, self).__init__()
         self.run_id = run_id
         self.experiment_id = experiment_id
+        self.epoch = epoch 
+
 
     def run(self):
         mlflow.start_run(run_id=self.run_id).__enter__()  # attach to run
@@ -42,5 +44,5 @@ class FreeThread(Process):
                 m["Free - Total Total GB"] = float(line[1]) / 1024
                 m["Free - Total Used GB"] = float(line[2]) / 1024
                 m["Free - Total Free GB"] = float(line[3]) / 1024
-                mlflow.log_metrics(m)
+                mlflow.log_metrics(m, self.epoch.value)
                 m = {}

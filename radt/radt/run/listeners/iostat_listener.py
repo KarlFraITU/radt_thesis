@@ -6,10 +6,12 @@ from multiprocessing import Process
 
 
 class IOstatThread(Process):
-    def __init__(self, run_id, experiment_id=88):
+    def __init__(self, run_id, epoch=0, experiment_id=88):
         super(IOstatThread, self).__init__()
         self.run_id = run_id
         self.experiment_id = experiment_id
+        self.epoch = epoch 
+
 
     def run(self):
         mlflow.start_run(run_id=self.run_id).__enter__()  # attach to run
@@ -43,7 +45,7 @@ class IOstatThread(Process):
                 m[f"iostat - {device} - MB read"] = float(mb_read)
                 m[f"iostat - {device} - MB written"] = float(mb_written)
 
-                mlflow.log_metrics(m)
+                mlflow.log_metrics(m, self.epoch.value)
 
                 if device in devices:
                     mlflow.log_metrics(
@@ -53,7 +55,7 @@ class IOstatThread(Process):
                             "iostat - Total MB written/s": total_mb_written_s,
                             "iostat - Total MB read": total_mb_read,
                             "iostat - Total MB written": total_mb_written,
-                        }
+                        }, self.epoch.value
                     )
                     devices = set()
                     total_tps, total_mb_read_s, total_mb_written_s = 0, 0, 0

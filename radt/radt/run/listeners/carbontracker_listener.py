@@ -7,24 +7,26 @@ import sys
 import tempfile
 from time import sleep, time
 from carbontracker.tracker import CarbonTracker
-from .epoch_listener import EpochListener
 
 class CarbonTrackerListener(threading.Thread):
     """
     CarbonTrackerListener handles the CarbonTracker instance and coordinates
     with the EpochListener to detect epoch transitions.
     """
-    def __init__(self, run_id, experiment_id=88, carbon_log_dir='./carbon_logs'):
+    def __init__(self, run_id, epoch=0, experiment_id=88, carbon_log_dir='./carbon_logs'):
         super(CarbonTrackerListener, self).__init__()
         self.run_id = run_id
         self.experiment_id = experiment_id
+        self.epoch = epoch
         
         self.carbon_log_dir = carbon_log_dir
-        self.max_epochs = int(os.getenv("RADT_MAX_EPOCH"))
+        self.max_epochs = int(os.getenv("RADT_MAX_EPOCH")) 
 
         os.makedirs(carbon_log_dir, exist_ok=True)
+        
+        # Initialize a stop event for clean thread termination
+        self._stop_event = threading.Event()
 
-        self.current_epoch = -1
         self.last_epoch_time = time()
         self.latest_log_file = None
 
@@ -35,27 +37,26 @@ class CarbonTrackerListener(threading.Thread):
             update_interval=10
         )
 
-        # Set up the EpochListener
-        self.epoch_listener = EpochListener(callback=self._on_epoch_detected)
-        self._stop_event = threading.Event()
+    def _on_epoch_detected(self, new_epoch):
+        """
+        Callback called when a new epoch is detected.
+        """
+        # If you would like to detect a change (for example, new_epoch != previous epoch)
+        # then additional state should be maintained if necessary.
+        try:
+            # If we're moving on from a previous epoch, stop it first.
+            # In this example, we assume that if new_epoch > previous epoch,
+            # then an epoch just ended.
+            if new_epoch > 0:
+                self.carbon_tracker.epoch_end()
+                self.parse_and_log_metrics(new_epoch - 1)
+        except Exception as e:
+            print(f"Error ending epoch {new_epoch - 1}: {e}")
 
-    def _on_epoch_detected(self, epoch, line):
-        """
-        Callback that is called when a new epoch is detected.
-        """
-        if epoch != self.current_epoch:
-            if self.current_epoch >= 0:
-                try:
-                    self.carbon_tracker.epoch_end()
-                    self.parse_and_log_metrics(self.current_epoch)
-                except Exception as e:
-                    print(f"Error ending epoch {self.current_epoch}: {e}")
-            self.current_epoch = epoch
-            self.last_epoch_time = time()
-            try:
-                self.carbon_tracker.epoch_start()
-            except Exception as e:
-                print(f"Error starting epoch {epoch}: {e}")
+        try:
+            self.carbon_tracker.epoch_start()
+        except Exception as e:
+            print(f"Error starting epoch {new_epoch}: {e}")
 
     def parse_and_log_metrics(self, epoch):
         """
@@ -98,24 +99,28 @@ class CarbonTrackerListener(threading.Thread):
                     print("Could not parse carbon intensity from log.")
             
             if metrics:
-                mlflow.log_metrics(metrics, step=epoch)
+                mlflow.log_metrics(metrics, self.epoch.value)
                 
         except Exception as e:
             print(f"Error parsing or logging metrics from file {self.latest_log_file}: {e}")
 
     def run(self):
-        self.epoch_listener.start_capture()  # Starts stdout/stderr redirection
         mlflow.start_run(run_id=self.run_id).__enter__()
         self.carbon_tracker.epoch_start()
-        self.current_epoch = 0
-        self.last_epoch_time = time()
+
+        # Local copy of epoch to detect changes
+        last_epoch = self.epoch.value
 
         try:
-            while not self._stop_event.is_set() and self.current_epoch < self.max_epochs:
-                time_now = time()
-                sleep(1)
+            while not self._stop_event.is_set() and self.epoch.value < self.max_epochs:
+                # Check if the shared variable was updated
+                if self.epoch.value != last_epoch:
+                    self._on_epoch_detected(self.epoch.value)
+                    last_epoch = self.epoch.value  # update local copy
+
+                sleep(1)  # adjust sleep duration as necessary
         except Exception as e:
-            print(f"Error in CarbonTrackerManager: {e}")
+            print(f"Error in CarbonTrackerListener: {e}")
         finally:
             try:
                 self.carbon_tracker.epoch_end()
@@ -128,7 +133,6 @@ class CarbonTrackerListener(threading.Thread):
                     print(f"Error logging final carbon log artifact: {e}")
             self.carbon_tracker.stop()
             mlflow.end_run()
-            self.epoch_listener.stop_capture()
 
     def terminate(self):
         self._stop_event.set()

@@ -8,11 +8,13 @@ from multiprocessing import Process
 
 # This listener writes *a lot* of metrics and may affect performance!
 class PSThread(Process):
-    def __init__(self, run_id, experiment_id=88):
+    def __init__(self, run_id, epoch=0, experiment_id=88):
         super(PSThread, self).__init__()
         self.run_id = run_id
         self.experiment_id = experiment_id
         self.parent_pid = os.getpid()
+        self.epoch = epoch 
+
 
     def run(self):
         mlflow.start_run(run_id=self.run_id).__enter__()  # attach to run
@@ -37,6 +39,6 @@ class PSThread(Process):
                 cpu = line[3]
                 mem = line[4]
 
-                mlflow.log_metric(f"PS - CPU {psr}", float(cpu))
-                mlflow.log_metric(f"PS - MEM {psr}", float(mem))
+                mlflow.log_metric(f"PS - CPU {psr}", float(cpu), self.epoch.value)
+                mlflow.log_metric(f"PS - MEM {psr}", float(mem), self.epoch.value)
             time.sleep(5)

@@ -30,10 +30,12 @@ METRIC_NAMES = [
 
 
 class DCGMIThread(Process):
-    def __init__(self, run_id, experiment_id=88):
+    def __init__(self, run_id, epoch=0, experiment_id=88):
         super(DCGMIThread, self).__init__()
         self.run_id = run_id
         self.experiment_id = experiment_id
+        self.epoch = epoch 
+
 
         # Hierarchy of metrics to monitor. Fall back in ascending order if certain metrics are not available for collection.
         self.dcgm_fields = [
@@ -117,4 +119,4 @@ class DCGMIThread(Process):
                         value = 0
                     m[f"DCGMI - {name}"] = float(value)
 
-                mlflow.log_metrics(m)
+                mlflow.log_metrics(m, self.epoch.value)
