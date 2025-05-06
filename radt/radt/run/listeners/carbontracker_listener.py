@@ -36,7 +36,7 @@ class CarbonTrackerListener(threading.Thread):
         )
 
         # Set up the EpochListener
-        self.epoch_listener = EpochListener(callback=self._on_epoch_detected)
+        self.epoch_listener = EpochListener(callback=self._on_epoch_detected, pattern=str(os.getenv("RADT_EPOCH_REGEX")))
         self._stop_event = threading.Event()
 
     def _on_epoch_detected(self, epoch, line):

@@ -115,6 +115,13 @@ def schedule_parse_arguments(args: list):
         default=False,
         help="Only start tracking run when context is initialised",
     )
+    parser.add_argument(
+        "--epoch_regex",
+        type=str,
+        dest="epoch_regex",
+        default=None,
+        help="Regex for printed epoch from training script",
+    )
 
     return parser.parse_args(args)
 

@@ -596,6 +596,7 @@ def start_schedule(parsed_args: Namespace, file: Path, args_passthrough: list):
                         "RADT_DCGMI_GROUP": str(dcgmi_table[id]),
                         "SMI_GPU_ID": str(row["Devices"]),
                         "RADT_MAX_EPOCH": str(parsed_args.max_epoch),
+                        "RADT_EPOCH_REGEX": str(parsed_args.epoch_regex),
                         "RADT_MAX_TIME": str(parsed_args.max_time * 60),
                         "RADT_MANUAL_MODE": "True" if parsed_args.manual else "False",
                     }
