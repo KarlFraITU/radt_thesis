@@ -119,7 +119,7 @@ def schedule_parse_arguments(args: list):
         "--epoch_regex",
         type=str,
         dest="epoch_regex",
-        default=None,
+        default="Epoch:\s*(\d+)",
         help="Regex for printed epoch from training script",
     )
 
